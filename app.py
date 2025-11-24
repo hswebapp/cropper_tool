@@ -20,16 +20,38 @@ CORS(app, resources={r"/*": {"origins": "*"}},
 # -------------------- Helper: Decrypt PDF if needed --------------------
 
 def decrypt_pdf_if_needed(pdf_bytes, password):
+    """
+    Returns decrypted PDF bytes if needed.
+    If PDF is not encrypted → returns original bytes.
+    If encrypted and password correct → returns decrypted bytes.
+    If encrypted and password wrong → returns None.
+    """
+
     try:
-        with pikepdf.open(io.BytesIO(pdf_bytes), password=password) as pdf:
-            output = io.BytesIO()
-            pdf.save(output)
-            return output.getvalue()
+        # Try opening normally first (non-encrypted PDF will work)
+        with pikepdf.open(io.BytesIO(pdf_bytes)) as pdf:
+            print("PDF IS NOT ENCRYPTED")
+            out = io.BytesIO()
+            pdf.save(out)
+            return out.getvalue()
+
     except pikepdf.PasswordError:
-        return None
+        # PDF is encrypted → try decrypting with given password
+        print("PDF IS ENCRYPTED, TRYING PROVIDED PASSWORD...")
+        try:
+            with pikepdf.open(io.BytesIO(pdf_bytes), password=password) as pdf:
+                out = io.BytesIO()
+                pdf.save(out)
+                print("DECRYPTED SUCCESSFULLY")
+                return out.getvalue()
+        except Exception:
+            print("WRONG PASSWORD")
+            return None
+
     except Exception as e:
-        print("Decrypt error:", e)
+        print("UNKNOWN ERROR:", e)
         return None
+
 # -------------------- Aadhaar Card Crop Function --------------------
 def crop_bottom_half(pil_img, crop_ratio=0.45):
     """Crops the bottom part of Aadhaar PDF where the actual card exists."""
@@ -143,7 +165,7 @@ def crop_pan():
 
     cropped_imgs = []
     for idx, page in enumerate(pages, 1):
-        cropped = crop_bottom_half(page, crop_ratio=0.238) 
+        
         cropped = crop_image(
                                 page,
                                 top=0.768,        # remove 0.768 from top
@@ -173,6 +195,61 @@ def crop_pan():
     return send_file(zip_buf, mimetype="application/zip",
                      as_attachment=True,
                      download_name="pancard_cropped.zip")
+
+
+
+@app.route("/crop_eshram", methods=["POST", "OPTIONS"])
+
+def crop_eshram():
+    if 'file' not in request.files:
+        return jsonify({"error": "Missing file"}), 400
+
+    file = request.files['file']
+    password = request.form.get("password")
+    print("PASSWORD RECEIVED:", password)
+
+    pdf_bytes = file.read()
+
+    pdf_bytes = decrypt_pdf_if_needed(pdf_bytes, password)
+    if pdf_bytes is None:
+        return jsonify({"error": "Invalid or password-protected PDF"}), 401
+
+    try:
+        pages = convert_from_bytes(pdf_bytes, dpi=200)
+    except Exception as e:
+        return jsonify({"error": f"PDF to image conversion failed: {str(e)}"}), 500
+
+    cropped_imgs = []
+    for idx, page in enumerate(pages, 1):
+        cropped = crop_image(
+                                page,
+                                top=0.07,        # remove 0.07 from top
+                                bottom=0.46,     # remove 0.46 from bottom
+                                left=0.23,       # remove 0.23 from left
+                                right=0.28       # remove 0.28 from right
+                            )# adjust ratio if needed
+        cropped_imgs.append((f"pan_page_{idx}.png", cropped))
+
+    if len(cropped_imgs) == 1:
+        buf = io.BytesIO()
+        cropped_imgs[0][1].save(buf, format="PNG")
+        buf.seek(0)
+        return send_file(buf, mimetype="image/png",
+                         as_attachment=True,
+                         download_name=cropped_imgs[0][0])
+
+    import zipfile
+    zip_buf = io.BytesIO()
+    with zipfile.ZipFile(zip_buf, 'w') as zf:
+        for fname, img in cropped_imgs:
+            img_bytes = io.BytesIO()
+            img.save(img_bytes, format="PNG")
+            img_bytes.seek(0)
+            zf.writestr(fname, img_bytes.read())
+    zip_buf.seek(0)
+    return send_file(zip_buf, mimetype="application/zip",
+                     as_attachment=True,
+                     download_name="eshram_cropped.zip")
 
 
 if __name__ == "__main__":
