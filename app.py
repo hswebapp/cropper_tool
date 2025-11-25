@@ -357,6 +357,59 @@ def crop_abha():
                      as_attachment=True,
                      download_name="abha_cropped.zip")
 
+@app.route("/crop_udid", methods=["POST", "OPTIONS"])
+
+def crop_udid():
+    if 'file' not in request.files:
+        return jsonify({"error": "Missing file"}), 400
+
+    file = request.files['file']
+    password = request.form.get("password")
+    print("PASSWORD RECEIVED:", password)
+
+    pdf_bytes = file.read()
+
+    pdf_bytes = decrypt_pdf_if_needed(pdf_bytes, password)
+    if pdf_bytes is None:
+        return jsonify({"error": "Invalid or password-protected PDF"}), 401
+
+    try:
+        pages = convert_from_bytes(pdf_bytes, dpi=200)
+    except Exception as e:
+        return jsonify({"error": f"PDF to image conversion failed: {str(e)}"}), 500
+
+    cropped_imgs = []
+    for idx, page in enumerate(pages, 1):
+        cropped = crop_image(
+                                page,
+                                top=0.05,        # remove 0.05 from top
+                                bottom=0.54,     # remove 0.54 from bottom
+                                left=0.07,       # remove 0.07 from left
+                                right=0.47       # remove 0.47 from right
+                            )# adjust ratio if needed
+        cropped_imgs.append((f"udid_page{idx}.png", cropped))
+
+    if len(cropped_imgs) == 1:
+        buf = io.BytesIO()
+        cropped_imgs[0][1].save(buf, format="PNG")
+        buf.seek(0)
+        return send_file(buf, mimetype="image/png",
+                         as_attachment=True,
+                         download_name=cropped_imgs[0][0])
+
+    import zipfile
+    zip_buf = io.BytesIO()
+    with zipfile.ZipFile(zip_buf, 'w') as zf:
+        for fname, img in cropped_imgs:
+            img_bytes = io.BytesIO()
+            img.save(img_bytes, format="PNG")
+            img_bytes.seek(0)
+            zf.writestr(fname, img_bytes.read())
+    zip_buf.seek(0)
+    return send_file(zip_buf, mimetype="application/zip",
+                     as_attachment=True,
+                     download_name="udid_cropped.zip")
+
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)
