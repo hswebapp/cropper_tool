@@ -9,6 +9,7 @@ import cv2
 from PyPDF2 import PdfReader, PdfWriter
 from PIL import Image
 import pikepdf
+from pypdf import PdfReader, PdfWriter
 
 app = Flask(__name__)
 # ✅ initialize CORS correctly
@@ -468,6 +469,50 @@ def crop_uan():
     return send_file(zip_buf, mimetype="application/zip",
                      as_attachment=True,
                      download_name="uan_cropped.zip")
+
+from pypdf import PdfReader, PdfWriter
+
+@app.route("/unlock_pdf", methods=["POST", "OPTIONS"])
+def unlock_pdf():
+    if 'file' not in request.files:
+        return jsonify({"error": "Missing file"}), 400
+
+    file = request.files['file']
+    password = request.form.get("password")
+
+    if not password:
+        return jsonify({"error": "Password is required"}), 400
+
+    pdf_bytes = file.read()
+
+    try:
+        reader = PdfReader(io.BytesIO(pdf_bytes))
+
+        if reader.is_encrypted:
+            result = reader.decrypt(password)
+
+            if result == 0:
+                return jsonify({"error": "Incorrect password"}), 401
+
+        writer = PdfWriter()
+
+        for page in reader.pages:
+            writer.add_page(page)
+
+        output_stream = io.BytesIO()
+        writer.write(output_stream)
+        output_stream.seek(0)
+
+        return send_file(
+            output_stream,
+            mimetype="application/pdf",
+            as_attachment=True,
+            download_name="unlocked.pdf"
+        )
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 
 
 if __name__ == "__main__":
