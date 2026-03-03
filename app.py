@@ -335,7 +335,7 @@ def crop_abha():
         cropped = crop_image(
                                 page,
                                 top=0.00,        # remove 0.00 from top
-                                bottom=0.50,     # remove 0.50 from bottom
+                                bottom=0.00,     # remove 0.50 from bottom
                                 left=0.00,       # remove 0.00 from left
                                 right=0.00       # remove 0.00 from right
                             )# adjust ratio if needed
